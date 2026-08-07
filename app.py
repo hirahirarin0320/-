@@ -5,10 +5,22 @@ import streamlit as st
 
 # ページ基本設定
 st.set_page_config(
-    page_title="原神 聖遺物スコア計算", page_icon="", layout="centered"
+    page_title="原神 聖遺物スコア計算", layout="centered"
 )
 
-st.title(" 原神 聖遺物一括スコア計算")
+st.title("原神 聖遺物一括スコア計算")
+
+
+# ステータス名の日本語変換マッピング
+STAT_NAME_MAP = {
+    "ATK": "攻撃",
+    "CRIT Rate": "会心率",
+    "CRIT DMG": "会心ダメ",
+    "Elemental Mastery": "熟知",
+    "DEF": "防御",
+    "Energy Recharge": "元チャ",
+    "HP": "HP",
+}
 
 
 # OCRリーダーのキャッシュ
@@ -30,22 +42,27 @@ def parse_stat_value(raw_text):
     return val, has_percent
 
 
+def translate_text(text):
+    """OCRで読み取った英字テキストを日本語表記に変換"""
+    translated = text
+    for eng, jpn in STAT_NAME_MAP.items():
+        translated = re.sub(rf"\b{eng}\b", jpn, translated, flags=re.IGNORECASE)
+    return translated
+
+
 def auto_crop_mainstat(image):
-    """
-    (1052, 130, 1710, 184) の領域を下方向に約2倍に拡張
-    高さ方向： 12.0% 〜 22.0% に変更
-    """
+    """メインステータス領域の切り抜き（割合）"""
     width, height = image.size
     left = int(width * 0.548)
     top = int(height * 0.120)
     right = int(width * 0.890)
-    bottom = int(height * 0.220)  # 下側に伸ばすため 0.170 -> 0.220 に拡張
+    bottom = int(height * 0.220)
 
     return image.crop((left, top, right, bottom))
 
 
 def auto_crop_substats(image):
-    """サブステータス領域の割合切り抜き"""
+    """サブステータス領域の切り抜き（割合）"""
     width, height = image.size
     left = int(width * 0.50)
     top = int(height * 0.20)
@@ -121,12 +138,12 @@ if uploaded_files:
             main_crop.save("temp_main_crop.png")
             main_result = reader.readtext("temp_main_crop.png")
 
-            # 複数行読み取れるようにテキストを結合
-            main_stat_name = (
+            raw_main_text = (
                 " ".join([res[1] for res in main_result])
                 if len(main_result) > 0
                 else "不明"
             )
+            main_stat_name = translate_text(raw_main_text)
 
             # 2. サブステータス読み取り
             sub_crop = auto_crop_substats(image)
@@ -161,7 +178,7 @@ if uploaded_files:
 
     # デバッグ表示
     if show_debug:
-        st.subheader("🔍 デバッグ：切り抜かれた領域")
+        st.subheader("デバッグ：切り抜かれた領域")
         for item in st.session_state["processed_data"]:
             st.write(f"**{item['filename']}**")
             st.image(
@@ -192,7 +209,7 @@ if uploaded_files:
     results = sorted(results, key=lambda x: x["score"], reverse=True)
 
     # 結果表示
-    st.subheader(" スコア結果一覧（スコア順）")
+    st.subheader("スコア結果一覧（スコア順）")
 
     for item in results:
         score = item["score"]
@@ -201,15 +218,15 @@ if uploaded_files:
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                st.markdown(f"** {item['filename']}**")
-                st.caption(f" メイン: **{item['main_stat']}**")
+                st.markdown(f"**{item['filename']}**")
+                st.caption(f"メイン: **{item['main_stat']}**")
 
                 stats = item["stats"]
                 details = []
                 if "CRIT Rate" in stats and stats["CRIT Rate"]["is_percent"]:
-                    details.append(f"率:{stats['CRIT Rate']['val']}%")
+                    details.append(f"会心率:{stats['CRIT Rate']['val']}%")
                 if "CRIT DMG" in stats and stats["CRIT DMG"]["is_percent"]:
-                    details.append(f"ダメ:{stats['CRIT DMG']['val']}%")
+                    details.append(f"会心ダメ:{stats['CRIT DMG']['val']}%")
 
                 target_key = {
                     "攻撃": "ATK",
