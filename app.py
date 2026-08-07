@@ -77,22 +77,23 @@ def read_text_from_image(pil_image):
 # --- 切り抜き関数（高精度：調整済み） ---
 def high_crop_mainstat(image):
     width, height = image.size
+    # 右端を少し右へ拡張 (width * 0.890 -> width * 0.920)
     return image.crop((
         int(width * 0.548),
         int(height * 0.120),
-        int(width * 0.890),
+        int(width * 0.920),
         int(height * 0.220),
     ))
 
 
 def high_crop_substats(image):
     width, height = image.size
-    # 縦サイズを5/4倍（1.25倍）に拡張（height * 0.300 -> height * 0.375）
+    # 下から1/8を削減 (height * 0.575 -> height * 0.528)
     return image.crop((
         int(width * 0.500),
         int(height * 0.200),
         int(width * 0.950),
-        int(height * 0.575),
+        int(height * 0.528),
     ))
 
 
