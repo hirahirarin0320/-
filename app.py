@@ -5,13 +5,13 @@ import streamlit as st
 
 # ページ基本設定
 st.set_page_config(
-    page_title="原神 聖遺物スコア計算", page_icon="", layout="centered"
+    page_title="原神 聖遺物スコア計算", page_icon="⚔️", layout="centered"
 )
 
-st.title(" 原神 聖遺物一括スコア計算")
+st.title("⚔️ 原神 聖遺物一括スコア計算")
 
 
-# OCRリーダーのキャッシュ（アプリ起動時の読み込みを高速化）
+# OCRリーダーのキャッシュ
 @st.cache_resource
 def load_ocr():
     return easyocr.Reader(["en"])
@@ -28,6 +28,28 @@ def parse_stat_value(raw_text):
     val = float(match.group(1))
     has_percent = "%" in raw_text
     return val, has_percent
+
+
+def auto_crop_mainstat(image):
+    """(1052, 130, 1710, 184) の座標を指定した割合(%)に変換して切り抜き"""
+    width, height = image.size
+    left = int(width * 0.548)
+    top = int(height * 0.120)
+    right = int(width * 0.890)
+    bottom = int(height * 0.170)
+
+    return image.crop((left, top, right, bottom))
+
+
+def auto_crop_substats(image):
+    """サブステータス領域の割合切り抜き"""
+    width, height = image.size
+    left = int(width * 0.50)
+    top = int(height * 0.20)
+    right = int(width * 0.95)
+    bottom = int(height * 0.50)
+
+    return image.crop((left, top, right, bottom))
 
 
 def calculate_score(stats, build):
@@ -53,33 +75,16 @@ def calculate_score(stats, build):
     elif build == "元チャ" and stats.get("Energy Recharge", {}).get("is_percent"):
         selected_val = stats["Energy Recharge"]["val"]
     elif build == "熟知":
-        selected_val = stats.get("Elemental Mastery", {}).get("val", 0.0)
+        # 熟知のみ0.25倍を適用
+        selected_val = stats.get("Elemental Mastery", {}).get("val", 0.0) * 0.25
 
     return selected_val + crit_dmg + (crit_rate * 2)
-
-
-def auto_crop_substats(image):
-    """
-    解像度・アスペクト比の違いに対応するため、
-    画像の全体の割合(%)指定でサブステータス領域を切り抜く
-    """
-    width, height = image.size
-
-    # 右側中段〜下段あたり（サブステータスが表示される領域）の比率を指定
-    # 必要に応じて比率を微調整できます
-    left = int(width * 0.50)  # 左から50%の位置
-    top = int(height * 0.20)  # 上から20%の位置
-    right = int(width * 0.95)  # 右から95%の位置
-    bottom = int(height * 0.50)  # 下から50%の位置
-
-    return image.crop((left, top, right, bottom))
 
 
 # --------------------
 # UI・操作エリア
 # --------------------
 
-# デバッグ用モードチェックボックス（切り抜き範囲の確認用）
 show_debug = st.sidebar.checkbox("デバッグ表示（切り抜き領域の確認）")
 
 uploaded_files = st.file_uploader(
@@ -89,7 +94,6 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    # OCR解析（セッション状態に保存して再計算時の無駄なOCRを防止）
     if (
         "processed_data" not in st.session_state
         or st.session_state.get("file_count") != len(uploaded_files)
@@ -110,11 +114,18 @@ if uploaded_files:
         for idx, file in enumerate(uploaded_files):
             image = Image.open(file)
 
-            # 割合に基づく自動切り抜き
-            crop = auto_crop_substats(image)
-            crop.save("temp_crop.png")
+            # 1. メインステータス読み取り
+            main_crop = auto_crop_mainstat(image)
+            main_crop.save("temp_main_crop.png")
+            main_result = reader.readtext("temp_main_crop.png")
+            main_stat_name = (
+                main_result[0][1] if len(main_result) > 0 else "不明"
+            )
 
-            result = reader.readtext("temp_crop.png")
+            # 2. サブステータス読み取り
+            sub_crop = auto_crop_substats(image)
+            sub_crop.save("temp_sub_crop.png")
+            result = reader.readtext("temp_sub_crop.png")
 
             stats = {}
             for i in range(len(result) - 1):
@@ -125,7 +136,13 @@ if uploaded_files:
                     stats[name] = {"val": val, "is_percent": is_percent}
 
             processed_data.append(
-                {"filename": file.name, "stats": stats, "crop_img": crop}
+                {
+                    "filename": file.name,
+                    "main_stat": main_stat_name,
+                    "stats": stats,
+                    "main_crop": main_crop,
+                    "sub_crop": sub_crop,
+                }
             )
             progress_bar.progress(
                 (idx + 1) / len(uploaded_files),
@@ -136,14 +153,18 @@ if uploaded_files:
         st.session_state["file_count"] = len(uploaded_files)
         progress_bar.empty()
 
-    # デバッグ表示（サイドバーのチェックが入っていれば表示）
+    # デバッグ表示
     if show_debug:
-        st.subheader(" デバッグ：切り抜かれた領域")
+        st.subheader("🔍 デバッグ：切り抜かれた領域")
         for item in st.session_state["processed_data"]:
+            st.write(f"**{item['filename']}**")
             st.image(
-                item["crop_img"],
-                caption=f"{item['filename']} の切り抜き範囲",
-                width=300,
+                item["main_crop"],
+                caption=f"メインステ切り抜き: {item['main_stat']}",
+                width=200,
+            )
+            st.image(
+                item["sub_crop"], caption="サブステ切り抜き", width=300
             )
 
     # 計算方法の選択
@@ -154,18 +175,28 @@ if uploaded_files:
         horizontal=True,
     )
 
-    # 結果表示
-    st.subheader(" スコア結果一覧")
+    # 各要素のスコア計算と並び替え
     data = st.session_state["processed_data"]
-
+    results = []
     for item in data:
         score = calculate_score(item["stats"], build_type)
+        results.append({**item, "score": score})
+
+    # スコアの高い順にソート (降順)
+    results = sorted(results, key=lambda x: x["score"], reverse=True)
+
+    # 結果表示
+    st.subheader("📊 スコア結果一覧（スコア順）")
+
+    for item in results:
+        score = item["score"]
 
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
 
             with col1:
                 st.markdown(f"**📄 {item['filename']}**")
+                st.caption(f"👑 メイン: **{item['main_stat']}**")
 
                 stats = item["stats"]
                 details = []
@@ -181,6 +212,7 @@ if uploaded_files:
                     "元チャ": "Energy Recharge",
                     "熟知": "Elemental Mastery",
                 }[build_type]
+
                 if target_key in stats:
                     st_val = stats[target_key]
                     if build_type == "熟知" or st_val["is_percent"]:
@@ -190,7 +222,7 @@ if uploaded_files:
                 detail_text = (
                     " / ".join(details) if details else "対象ステータスなし"
                 )
-                st.caption(f"({detail_text})")
+                st.caption(f"サブ: ({detail_text})")
 
             with col2:
                 score_str = f"{score:.1f}"
