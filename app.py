@@ -9,7 +9,6 @@ st.set_page_config(page_title="原神 聖遺物スコア計算", layout="centere
 
 st.title("原神 聖遺物一括スコア計算")
 
-
 # ステータス名の日本語変換マッピング
 STAT_NAME_MAP = {
     "ATK": "攻撃",
@@ -40,16 +39,6 @@ def load_ocr():
 reader = load_ocr()
 
 
-def parse_stat_value(raw_text):
-    """数値と%の有無を判定"""
-    match = re.search(r"(\d+(?:\.\d+)?)", raw_text)
-    if not match:
-        return 0.0, False
-    val = float(match.group(1))
-    has_percent = "%" in raw_text
-    return val, has_percent
-
-
 def translate_text(text):
     """OCRで読み取った英字テキストを日本語表記に変換"""
     translated = text
@@ -71,60 +60,92 @@ def read_text_from_image(pil_image):
     if pil_image is None:
         return []
     np_image = np.array(pil_image)
-    return reader.readtext(np_image)
+    return reader.readtext(np_image, detail=0)  # テキスト文字列の配列のみ取得
 
 
-# --- 切り抜き関数（高精度：調整済み） ---
+def parse_substats_from_text_list(text_list):
+    """認識されたテキスト文字列のリスト全体からサブステータスと数値を一括抽出"""
+    full_text = " ".join(text_list)
+    stats = {}
+
+    # 各ステータスの検知パターン (正規表現)
+    patterns = {
+        "CRIT Rate": r"(CRIT\s*Rate|CRIT\s*Rate%?|Crit\s*Rate)[^\d]*(\d+(?:\.\d+)?)",
+        "CRIT DMG": r"(CRIT\s*DMG|CRIT\s*Dmg|Crit\s*DMG)[^\d]*(\d+(?:\.\d+)?)",
+        "ATK": r"(ATK)[^\d]*(\d+(?:\.\d+)?)",
+        "DEF": r"(DEF)[^\d]*(\d+(?:\.\d+)?)",
+        "HP": r"(HP)[^\d]*(\d+(?:\.\d+)?)",
+        "Energy Recharge": r"(Energy\s*Recharge|Energy\s*Rech\w*)[^\d]*(\d+(?:\.\d+)?)",
+        "Elemental Mastery": r"(Elemental\s*Mastery|Elemental\s*Mas\w*)[^\d]*(\d+(?:\.\d+)?)",
+    }
+
+    for stat_key, pattern in patterns.items():
+        match = re.search(pattern, full_text, re.IGNORECASE)
+        if match:
+            val_str = match.group(2)
+            try:
+                val = float(val_str)
+            except ValueError:
+                continue
+
+            # マッチした文字列前後のコンテキストからパーセント有無を判定
+            match_segment = full_text[match.start():match.end() + 5]
+            has_percent = "%" in match_segment
+
+            stats[stat_key] = {"val": val, "is_percent": has_percent}
+
+    return stats, full_text
+
+
+# --- 切り抜き関数（高精度） ---
 def high_crop_mainstat(image):
     width, height = image.size
-    # 右端を少し右へ拡張 (width * 0.890 -> width * 0.920)
     return image.crop((
-        int(width * 0.548),
-        int(height * 0.120),
-        int(width * 0.920),
-        int(height * 0.220),
+        int(width * 0.500),
+        int(height * 0.100),
+        int(width * 0.950),
+        int(height * 0.250),
     ))
 
 
 def high_crop_substats(image):
     width, height = image.size
-    # 下から1/8を削減 (height * 0.575 -> height * 0.528)
     return image.crop((
-        int(width * 0.500),
-        int(height * 0.200),
-        int(width * 0.950),
-        int(height * 0.528),
+        int(width * 0.450),
+        int(height * 0.180),
+        int(width * 0.980),
+        int(height * 0.600),
     ))
 
 
-# --- 切り抜き関数（通常：調整済み） ---
+# --- 切り抜き関数（通常） ---
 def normal_crop_type(image):
     width, height = image.size
     return image.crop((
-        int(width * (1260 / 1920)),
-        int(height * (210 / 1080)),
-        int(width * (1578 / 1920)),
-        int(height * (314 / 1080)),
+        int(width * (1200 / 1920)),
+        int(height * (200 / 1080)),
+        int(width * (1650 / 1920)),
+        int(height * (320 / 1080)),
     ))
 
 
 def normal_crop_mainstat(image):
     width, height = image.size
     return image.crop((
-        int(width * (1256 / 1920)),
-        int(height * (298 / 1080)),
-        int(width * (1530 / 1920)),
-        int(height * (430 / 1080)),
+        int(width * (1200 / 1920)),
+        int(height * (280 / 1080)),
+        int(width * (1600 / 1920)),
+        int(height * (440 / 1080)),
     ))
 
 
 def normal_crop_substats(image):
     width, height = image.size
     return image.crop((
-        int(width * (1286 / 1920)),
-        int(height * (594 / 1080)),
-        int(width * (1622 / 1920)),
-        int(height * (794 / 1080)),
+        int(width * (1200 / 1920)),
+        int(height * (550 / 1080)),
+        int(width * (1700 / 1920)),
+        int(height * (820 / 1080)),
     ))
 
 
@@ -164,7 +185,7 @@ st.sidebar.header("設定")
 mode = st.sidebar.radio(
     "判定モード", ["通常判定", "高精度判定"], help="画像の表示形式に合わせて選択"
 )
-show_debug = st.sidebar.checkbox("デバッグ表示（切り抜き領域の確認）")
+show_debug = st.sidebar.checkbox("デバッグ表示（切り抜き領域とRAW文字列の確認）")
 
 uploaded_files = st.file_uploader(
     f"聖遺物の画像をまとめて選択してください ({mode})",
@@ -180,16 +201,6 @@ if uploaded_files:
         or st.session_state.get(f"file_count_{mode}") != len(uploaded_files)
     ):
         processed_data = []
-        allowed = [
-            "CRIT Rate",
-            "CRIT DMG",
-            "ATK",
-            "HP",
-            "DEF",
-            "Elemental Mastery",
-            "Energy Recharge",
-        ]
-
         progress_bar = st.progress(0, text="解析中...")
 
         for idx, file in enumerate(uploaded_files):
@@ -200,11 +211,8 @@ if uploaded_files:
                 main_crop = normal_crop_mainstat(image)
                 sub_crop = normal_crop_substats(image)
 
-                # 部位解析
                 type_res = read_text_from_image(type_crop)
-                raw_type_text = (
-                    " ".join([res[1] for res in type_res]) if type_res else ""
-                )
+                raw_type_text = " ".join(type_res) if type_res else ""
                 artifact_type = parse_artifact_type(raw_type_text)
 
             else:  # 高精度判定
@@ -215,26 +223,19 @@ if uploaded_files:
 
             # メインステ解析
             main_res = read_text_from_image(main_crop)
-            raw_main_text = (
-                " ".join([res[1] for res in main_res]) if main_res else "不明"
-            )
+            raw_main_text = " ".join(main_res) if main_res else "不明"
             main_stat_name = translate_text(raw_main_text)
 
-            # サブステ解析
+            # サブステ解析 (新しいロジック)
             sub_res = read_text_from_image(sub_crop)
-            stats = {}
-            for i in range(len(sub_res) - 1):
-                name = sub_res[i][1]
-                if name in allowed:
-                    raw_val_text = sub_res[i + 1][1]
-                    val, is_percent = parse_stat_value(raw_val_text)
-                    stats[name] = {"val": val, "is_percent": is_percent}
+            stats, raw_sub_text = parse_substats_from_text_list(sub_res)
 
             processed_data.append({
                 "filename": file.name,
                 "artifact_type": artifact_type,
                 "main_stat": main_stat_name,
                 "stats": stats,
+                "raw_sub_text": raw_sub_text,
                 "type_crop": type_crop,
                 "main_crop": main_crop,
                 "sub_crop": sub_crop,
@@ -252,23 +253,27 @@ if uploaded_files:
 
     # デバッグ表示
     if show_debug:
-        st.subheader("デバッグ：切り抜かれた領域")
+        st.subheader("デバッグ情報")
         for item in data:
-            st.write(f"**{item['filename']}**")
-            if item["type_crop"]:
+            st.write(f"**ファイル名: {item['filename']}**")
+            st.write(f"**OCR取得テキスト**: `{item['raw_sub_text']}`")
+            st.write(f"**抽出サブステ**: `{item['stats']}`")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if item["type_crop"]:
+                    st.image(
+                        item["type_crop"],
+                        caption=f"部位: {item['artifact_type']}",
+                        width=200,
+                    )
                 st.image(
-                    item["type_crop"],
-                    caption=f"部位切り抜き: {item['artifact_type']}",
-                    width=250,
+                    item["main_crop"],
+                    caption=f"メイン: {item['main_stat']}",
+                    width=200,
                 )
-            st.image(
-                item["main_crop"],
-                caption=f"メインステ切り抜き: {item['main_stat']}",
-                width=250,
-            )
-            st.image(
-                item["sub_crop"], caption="サブステ切り抜き", width=300
-            )
+            with col_b:
+                st.image(item["sub_crop"], caption="サブステ領域", width=250)
+            st.markdown("---")
 
     st.markdown("---")
 
