@@ -1,13 +1,11 @@
 import re
-from PIL import Image
-import numpy as np
 import easyocr
+import numpy as np
+from PIL import Image
 import streamlit as st
 
 # ページ基本設定
-st.set_page_config(
-    page_title="原神 聖遺物スコア計算", layout="centered"
-)
+st.set_page_config(page_title="原神 聖遺物スコア計算", layout="centered")
 
 st.title("原神 聖遺物一括スコア計算")
 
@@ -97,14 +95,14 @@ def high_crop_substats(image):
     ))
 
 
-# --- 切り抜き関数（通常） ---
+# --- 切り抜き関数（通常：1/2下へ移動） ---
 def normal_crop_type(image):
     width, height = image.size
     return image.crop((
         int(width * (1260 / 1920)),
-        int(height * (184 / 1080)),
+        int(height * (210 / 1080)),
         int(width * (1578 / 1920)),
-        int(height * (236 / 1080)),
+        int(height * (262 / 1080)),
     ))
 
 
@@ -112,9 +110,9 @@ def normal_crop_mainstat(image):
     width, height = image.size
     return image.crop((
         int(width * (1256 / 1920)),
-        int(height * (232 / 1080)),
+        int(height * (298 / 1080)),
         int(width * (1530 / 1920)),
-        int(height * (364 / 1080)),
+        int(height * (430 / 1080)),
     ))
 
 
@@ -122,9 +120,9 @@ def normal_crop_substats(image):
     width, height = image.size
     return image.crop((
         int(width * (1286 / 1920)),
-        int(height * (474 / 1080)),
+        int(height * (554 / 1080)),
         int(width * (1510 / 1920)),
-        int(height * (634 / 1080)),
+        int(height * (714 / 1080)),
     ))
 
 
@@ -230,17 +228,15 @@ if uploaded_files:
                     val, is_percent = parse_stat_value(raw_val_text)
                     stats[name] = {"val": val, "is_percent": is_percent}
 
-            processed_data.append(
-                {
-                    "filename": file.name,
-                    "artifact_type": artifact_type,
-                    "main_stat": main_stat_name,
-                    "stats": stats,
-                    "type_crop": type_crop,
-                    "main_crop": main_crop,
-                    "sub_crop": sub_crop,
-                }
-            )
+            processed_data.append({
+                "filename": file.name,
+                "artifact_type": artifact_type,
+                "main_stat": main_stat_name,
+                "stats": stats,
+                "type_crop": type_crop,
+                "main_crop": main_crop,
+                "sub_crop": sub_crop,
+            })
             progress_bar.progress(
                 (idx + 1) / len(uploaded_files),
                 text=f"解析中... ({idx+1}/{len(uploaded_files)})",
@@ -329,9 +325,7 @@ if uploaded_files:
                     if mode == "通常判定"
                     else ""
                 )
-                st.caption(
-                    f"メイン: **{item['main_stat']}**{type_info}"
-                )
+                st.caption(f"メイン: **{item['main_stat']}**{type_info}")
 
                 stats = item["stats"]
                 details = []
