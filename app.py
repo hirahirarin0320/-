@@ -1,5 +1,6 @@
 import re
 from PIL import Image
+import numpy as np
 import easyocr
 import streamlit as st
 
@@ -67,6 +68,14 @@ def parse_artifact_type(raw_text):
     return "読み取れなかったもの"
 
 
+def read_text_from_image(pil_image):
+    """PIL画像をNumPy配列に変換してからOCR実行"""
+    if pil_image is None:
+        return []
+    np_image = np.array(pil_image)
+    return reader.readtext(np_image)
+
+
 # --- 切り抜き関数（高精度） ---
 def high_crop_mainstat(image):
     width, height = image.size
@@ -90,7 +99,6 @@ def high_crop_substats(image):
 
 # --- 切り抜き関数（通常） ---
 def normal_crop_type(image):
-    # (1260, 184, 1578, 236) -> 1920x1080基準
     width, height = image.size
     return image.crop((
         int(width * (1260 / 1920)),
@@ -101,7 +109,6 @@ def normal_crop_type(image):
 
 
 def normal_crop_mainstat(image):
-    # (1256, 232, 1530, 364)
     width, height = image.size
     return image.crop((
         int(width * (1256 / 1920)),
@@ -112,7 +119,6 @@ def normal_crop_mainstat(image):
 
 
 def normal_crop_substats(image):
-    # (1286, 474, 1510, 634)
     width, height = image.size
     return image.crop((
         int(width * (1286 / 1920)),
@@ -167,7 +173,6 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    # セッション状態のキー（モードが変わったら再解析）
     session_key = f"processed_data_{mode}"
 
     if (
@@ -188,7 +193,7 @@ if uploaded_files:
         progress_bar = st.progress(0, text="解析中...")
 
         for idx, file in enumerate(uploaded_files):
-            image = Image.open(file)
+            image = Image.open(file).convert("RGB")
 
             if mode == "通常判定":
                 type_crop = normal_crop_type(image)
@@ -196,7 +201,7 @@ if uploaded_files:
                 sub_crop = normal_crop_substats(image)
 
                 # 部位解析
-                type_res = reader.readtext(type_crop)
+                type_res = read_text_from_image(type_crop)
                 raw_type_text = (
                     " ".join([res[1] for res in type_res]) if type_res else ""
                 )
@@ -209,14 +214,14 @@ if uploaded_files:
                 artifact_type = "未設定"
 
             # メインステ解析
-            main_res = reader.readtext(main_crop)
+            main_res = read_text_from_image(main_crop)
             raw_main_text = (
                 " ".join([res[1] for res in main_res]) if main_res else "不明"
             )
             main_stat_name = translate_text(raw_main_text)
 
             # サブステ解析
-            sub_res = reader.readtext(sub_crop)
+            sub_res = read_text_from_image(sub_crop)
             stats = {}
             for i in range(len(sub_res) - 1):
                 name = sub_res[i][1]
@@ -295,7 +300,6 @@ if uploaded_files:
     # 各要素のスコア計算と並び替え
     results = []
     for item in data:
-        # 部位フィルタリング
         if mode == "通常判定" and selected_type != "すべて":
             if item["artifact_type"] != selected_type:
                 continue
