@@ -5,10 +5,10 @@ import streamlit as st
 
 # ページ基本設定
 st.set_page_config(
-    page_title="原神 聖遺物スコア計算", page_icon="⚔️", layout="centered"
+    page_title="原神 聖遺物スコア計算", page_icon="", layout="centered"
 )
 
-st.title("⚔️ 原神 聖遺物一括スコア計算")
+st.title(" 原神 聖遺物一括スコア計算")
 
 
 # OCRリーダーのキャッシュ
@@ -31,12 +31,15 @@ def parse_stat_value(raw_text):
 
 
 def auto_crop_mainstat(image):
-    """(1052, 130, 1710, 184) の座標を指定した割合(%)に変換して切り抜き"""
+    """
+    (1052, 130, 1710, 184) の領域を下方向に約2倍に拡張
+    高さ方向： 12.0% 〜 22.0% に変更
+    """
     width, height = image.size
     left = int(width * 0.548)
     top = int(height * 0.120)
     right = int(width * 0.890)
-    bottom = int(height * 0.170)
+    bottom = int(height * 0.220)  # 下側に伸ばすため 0.170 -> 0.220 に拡張
 
     return image.crop((left, top, right, bottom))
 
@@ -75,7 +78,6 @@ def calculate_score(stats, build):
     elif build == "元チャ" and stats.get("Energy Recharge", {}).get("is_percent"):
         selected_val = stats["Energy Recharge"]["val"]
     elif build == "熟知":
-        # 熟知のみ0.25倍を適用
         selected_val = stats.get("Elemental Mastery", {}).get("val", 0.0) * 0.25
 
     return selected_val + crit_dmg + (crit_rate * 2)
@@ -118,8 +120,12 @@ if uploaded_files:
             main_crop = auto_crop_mainstat(image)
             main_crop.save("temp_main_crop.png")
             main_result = reader.readtext("temp_main_crop.png")
+
+            # 複数行読み取れるようにテキストを結合
             main_stat_name = (
-                main_result[0][1] if len(main_result) > 0 else "不明"
+                " ".join([res[1] for res in main_result])
+                if len(main_result) > 0
+                else "不明"
             )
 
             # 2. サブステータス読み取り
@@ -161,7 +167,7 @@ if uploaded_files:
             st.image(
                 item["main_crop"],
                 caption=f"メインステ切り抜き: {item['main_stat']}",
-                width=200,
+                width=250,
             )
             st.image(
                 item["sub_crop"], caption="サブステ切り抜き", width=300
@@ -186,7 +192,7 @@ if uploaded_files:
     results = sorted(results, key=lambda x: x["score"], reverse=True)
 
     # 結果表示
-    st.subheader("📊 スコア結果一覧（スコア順）")
+    st.subheader(" スコア結果一覧（スコア順）")
 
     for item in results:
         score = item["score"]
@@ -195,8 +201,8 @@ if uploaded_files:
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                st.markdown(f"**📄 {item['filename']}**")
-                st.caption(f"👑 メイン: **{item['main_stat']}**")
+                st.markdown(f"** {item['filename']}**")
+                st.caption(f" メイン: **{item['main_stat']}**")
 
                 stats = item["stats"]
                 details = []
