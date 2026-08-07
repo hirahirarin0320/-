@@ -5,10 +5,10 @@ import streamlit as st
 
 # ページ基本設定
 st.set_page_config(
-    page_title="原神 聖遺物スコア計算", page_icon="⚔️", layout="centered"
+    page_title="原神 聖遺物スコア計算", page_icon="", layout="centered"
 )
 
-st.title("⚔️ 原神 聖遺物一括スコア計算")
+st.title(" 原神 聖遺物一括スコア計算")
 
 
 # OCRリーダーのキャッシュ（アプリ起動時の読み込みを高速化）
@@ -58,11 +58,30 @@ def calculate_score(stats, build):
     return selected_val + crit_dmg + (crit_rate * 2)
 
 
+def auto_crop_substats(image):
+    """
+    解像度・アスペクト比の違いに対応するため、
+    画像の全体の割合(%)指定でサブステータス領域を切り抜く
+    """
+    width, height = image.size
+
+    # 右側中段〜下段あたり（サブステータスが表示される領域）の比率を指定
+    # 必要に応じて比率を微調整できます
+    left = int(width * 0.50)  # 左から50%の位置
+    top = int(height * 0.20)  # 上から20%の位置
+    right = int(width * 0.95)  # 右から95%の位置
+    bottom = int(height * 0.50)  # 下から50%の位置
+
+    return image.crop((left, top, right, bottom))
+
+
 # --------------------
 # UI・操作エリア
 # --------------------
 
-# 1. 複数画像アップロード
+# デバッグ用モードチェックボックス（切り抜き範囲の確認用）
+show_debug = st.sidebar.checkbox("デバッグ表示（切り抜き領域の確認）")
+
 uploaded_files = st.file_uploader(
     "聖遺物の画像をまとめて選択してください",
     type=["png", "jpg", "jpeg"],
@@ -90,11 +109,11 @@ if uploaded_files:
 
         for idx, file in enumerate(uploaded_files):
             image = Image.open(file)
-            # サブステータス切り抜き (※解像度に合わせて切り抜き位置を調整)
-            crop = image.crop((1008, 204, 1750, 466))
 
-            # Streamlitのファイルオブジェクトから一 zeitファイル経由でOCR処理
+            # 割合に基づく自動切り抜き
+            crop = auto_crop_substats(image)
             crop.save("temp_crop.png")
+
             result = reader.readtext("temp_crop.png")
 
             stats = {}
@@ -105,7 +124,9 @@ if uploaded_files:
                     val, is_percent = parse_stat_value(raw_val_text)
                     stats[name] = {"val": val, "is_percent": is_percent}
 
-            processed_data.append({"filename": file.name, "stats": stats})
+            processed_data.append(
+                {"filename": file.name, "stats": stats, "crop_img": crop}
+            )
             progress_bar.progress(
                 (idx + 1) / len(uploaded_files),
                 text=f"解析中... ({idx+1}/{len(uploaded_files)})",
@@ -115,7 +136,17 @@ if uploaded_files:
         st.session_state["file_count"] = len(uploaded_files)
         progress_bar.empty()
 
-    # 2. 計算方法の選択（後から自由に切替可能）
+    # デバッグ表示（サイドバーのチェックが入っていれば表示）
+    if show_debug:
+        st.subheader(" デバッグ：切り抜かれた領域")
+        for item in st.session_state["processed_data"]:
+            st.image(
+                item["crop_img"],
+                caption=f"{item['filename']} の切り抜き範囲",
+                width=300,
+            )
+
+    # 計算方法の選択
     st.markdown("---")
     build_type = st.radio(
         "計算方法を選択してください",
@@ -123,21 +154,19 @@ if uploaded_files:
         horizontal=True,
     )
 
-    # 3. 結果表示
-    st.subheader("📊 スコア結果一覧")
+    # 結果表示
+    st.subheader(" スコア結果一覧")
     data = st.session_state["processed_data"]
 
     for item in data:
         score = calculate_score(item["stats"], build_type)
 
-        # カード型レイアウトで結果を表示
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
 
             with col1:
                 st.markdown(f"**📄 {item['filename']}**")
 
-                # ステータス内訳の作成
                 stats = item["stats"]
                 details = []
                 if "CRIT Rate" in stats and stats["CRIT Rate"]["is_percent"]:
@@ -164,7 +193,6 @@ if uploaded_files:
                 st.caption(f"({detail_text})")
 
             with col2:
-                # 40以上は強調
                 score_str = f"{score:.1f}"
                 if score >= 40:
                     st.metric(
