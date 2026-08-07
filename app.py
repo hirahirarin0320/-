@@ -95,14 +95,15 @@ def high_crop_substats(image):
     ))
 
 
-# --- 切り抜き関数（通常：1/2下へ移動） ---
+# --- 切り抜き関数（通常：調整済み） ---
 def normal_crop_type(image):
     width, height = image.size
+    # 縦サイズを2倍に拡張（52px -> 104px）
     return image.crop((
         int(width * (1260 / 1920)),
         int(height * (210 / 1080)),
         int(width * (1578 / 1920)),
-        int(height * (262 / 1080)),
+        int(height * (314 / 1080)),
     ))
 
 
@@ -118,11 +119,12 @@ def normal_crop_mainstat(image):
 
 def normal_crop_substats(image):
     width, height = image.size
+    # 高さの1/4(40px)下に移動、横幅を1.5倍(224px -> 336px)に拡張
     return image.crop((
         int(width * (1286 / 1920)),
-        int(height * (554 / 1080)),
-        int(width * (1510 / 1920)),
-        int(height * (714 / 1080)),
+        int(height * (594 / 1080)),
+        int(width * (1622 / 1920)),
+        int(height * (754 / 1080)),
     ))
 
 
