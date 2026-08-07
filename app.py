@@ -22,6 +22,15 @@ STAT_NAME_MAP = {
     "HP": "HP",
 }
 
+# 部位（種類）のマッピング
+ARTIFACT_TYPES = {
+    "Flower of Life": "花",
+    "Plume of Death": "羽",
+    "Sands of Eon": "時計",
+    "Goblet of Eonothem": "杯",
+    "Circlet of Logos": "冠",
+}
+
 
 # OCRリーダーのキャッシュ
 @st.cache_resource
@@ -50,26 +59,67 @@ def translate_text(text):
     return translated
 
 
-def auto_crop_mainstat(image):
-    """メインステータス領域の切り抜き（割合）"""
+def parse_artifact_type(raw_text):
+    """部位テキストから該当する日本語部位名を判定"""
+    for eng, jpn in ARTIFACT_TYPES.items():
+        if eng.lower() in raw_text.lower():
+            return jpn
+    return "読み取れなかったもの"
+
+
+# --- 切り抜き関数（高精度） ---
+def high_crop_mainstat(image):
     width, height = image.size
-    left = int(width * 0.548)
-    top = int(height * 0.120)
-    right = int(width * 0.890)
-    bottom = int(height * 0.220)
+    return image.crop((
+        int(width * 0.548),
+        int(height * 0.120),
+        int(width * 0.890),
+        int(height * 0.220),
+    ))
 
-    return image.crop((left, top, right, bottom))
 
-
-def auto_crop_substats(image):
-    """サブステータス領域の切り抜き（割合）"""
+def high_crop_substats(image):
     width, height = image.size
-    left = int(width * 0.50)
-    top = int(height * 0.20)
-    right = int(width * 0.95)
-    bottom = int(height * 0.50)
+    return image.crop((
+        int(width * 0.500),
+        int(height * 0.200),
+        int(width * 0.950),
+        int(height * 0.500),
+    ))
 
-    return image.crop((left, top, right, bottom))
+
+# --- 切り抜き関数（通常） ---
+def normal_crop_type(image):
+    # (1260, 184, 1578, 236) -> 1920x1080基準
+    width, height = image.size
+    return image.crop((
+        int(width * (1260 / 1920)),
+        int(height * (184 / 1080)),
+        int(width * (1578 / 1920)),
+        int(height * (236 / 1080)),
+    ))
+
+
+def normal_crop_mainstat(image):
+    # (1256, 232, 1530, 364)
+    width, height = image.size
+    return image.crop((
+        int(width * (1256 / 1920)),
+        int(height * (232 / 1080)),
+        int(width * (1530 / 1920)),
+        int(height * (364 / 1080)),
+    ))
+
+
+def normal_crop_substats(image):
+    # (1286, 474, 1510, 634)
+    width, height = image.size
+    return image.crop((
+        int(width * (1286 / 1920)),
+        int(height * (474 / 1080)),
+        int(width * (1510 / 1920)),
+        int(height * (634 / 1080)),
+    ))
 
 
 def calculate_score(stats, build):
@@ -104,18 +154,25 @@ def calculate_score(stats, build):
 # UI・操作エリア
 # --------------------
 
+st.sidebar.header("設定")
+mode = st.sidebar.radio(
+    "判定モード", ["通常判定", "高精度判定"], help="画像の表示形式に合わせて選択"
+)
 show_debug = st.sidebar.checkbox("デバッグ表示（切り抜き領域の確認）")
 
 uploaded_files = st.file_uploader(
-    "聖遺物の画像をまとめて選択してください",
+    f"聖遺物の画像をまとめて選択してください ({mode})",
     type=["png", "jpg", "jpeg"],
     accept_multiple_files=True,
 )
 
 if uploaded_files:
+    # セッション状態のキー（モードが変わったら再解析）
+    session_key = f"processed_data_{mode}"
+
     if (
-        "processed_data" not in st.session_state
-        or st.session_state.get("file_count") != len(uploaded_files)
+        session_key not in st.session_state
+        or st.session_state.get(f"file_count_{mode}") != len(uploaded_files)
     ):
         processed_data = []
         allowed = [
@@ -133,36 +190,48 @@ if uploaded_files:
         for idx, file in enumerate(uploaded_files):
             image = Image.open(file)
 
-            # 1. メインステータス読み取り
-            main_crop = auto_crop_mainstat(image)
-            main_crop.save("temp_main_crop.png")
-            main_result = reader.readtext("temp_main_crop.png")
+            if mode == "通常判定":
+                type_crop = normal_crop_type(image)
+                main_crop = normal_crop_mainstat(image)
+                sub_crop = normal_crop_substats(image)
 
+                # 部位解析
+                type_res = reader.readtext(type_crop)
+                raw_type_text = (
+                    " ".join([res[1] for res in type_res]) if type_res else ""
+                )
+                artifact_type = parse_artifact_type(raw_type_text)
+
+            else:  # 高精度判定
+                type_crop = None
+                main_crop = high_crop_mainstat(image)
+                sub_crop = high_crop_substats(image)
+                artifact_type = "未設定"
+
+            # メインステ解析
+            main_res = reader.readtext(main_crop)
             raw_main_text = (
-                " ".join([res[1] for res in main_result])
-                if len(main_result) > 0
-                else "不明"
+                " ".join([res[1] for res in main_res]) if main_res else "不明"
             )
             main_stat_name = translate_text(raw_main_text)
 
-            # 2. サブステータス読み取り
-            sub_crop = auto_crop_substats(image)
-            sub_crop.save("temp_sub_crop.png")
-            result = reader.readtext("temp_sub_crop.png")
-
+            # サブステ解析
+            sub_res = reader.readtext(sub_crop)
             stats = {}
-            for i in range(len(result) - 1):
-                name = result[i][1]
+            for i in range(len(sub_res) - 1):
+                name = sub_res[i][1]
                 if name in allowed:
-                    raw_val_text = result[i + 1][1]
+                    raw_val_text = sub_res[i + 1][1]
                     val, is_percent = parse_stat_value(raw_val_text)
                     stats[name] = {"val": val, "is_percent": is_percent}
 
             processed_data.append(
                 {
                     "filename": file.name,
+                    "artifact_type": artifact_type,
                     "main_stat": main_stat_name,
                     "stats": stats,
+                    "type_crop": type_crop,
                     "main_crop": main_crop,
                     "sub_crop": sub_crop,
                 }
@@ -172,15 +241,23 @@ if uploaded_files:
                 text=f"解析中... ({idx+1}/{len(uploaded_files)})",
             )
 
-        st.session_state["processed_data"] = processed_data
-        st.session_state["file_count"] = len(uploaded_files)
+        st.session_state[session_key] = processed_data
+        st.session_state[f"file_count_{mode}"] = len(uploaded_files)
         progress_bar.empty()
+
+    data = st.session_state[session_key]
 
     # デバッグ表示
     if show_debug:
         st.subheader("デバッグ：切り抜かれた領域")
-        for item in st.session_state["processed_data"]:
+        for item in data:
             st.write(f"**{item['filename']}**")
+            if item["type_crop"]:
+                st.image(
+                    item["type_crop"],
+                    caption=f"部位切り抜き: {item['artifact_type']}",
+                    width=250,
+                )
             st.image(
                 item["main_crop"],
                 caption=f"メインステ切り抜き: {item['main_stat']}",
@@ -190,8 +267,25 @@ if uploaded_files:
                 item["sub_crop"], caption="サブステ切り抜き", width=300
             )
 
-    # 計算方法の選択
     st.markdown("---")
+
+    # 通常判定時の部位絞り込みフィルター
+    selected_type = "すべて"
+    if mode == "通常判定":
+        selected_type = st.selectbox(
+            "部位で絞り込み",
+            [
+                "すべて",
+                "花",
+                "羽",
+                "時計",
+                "杯",
+                "冠",
+                "読み取れなかったもの",
+            ],
+        )
+
+    # 計算方法の選択
     build_type = st.radio(
         "計算方法を選択してください",
         ["攻撃", "熟知", "防御", "元チャ", "HP"],
@@ -199,9 +293,13 @@ if uploaded_files:
     )
 
     # 各要素のスコア計算と並び替え
-    data = st.session_state["processed_data"]
     results = []
     for item in data:
+        # 部位フィルタリング
+        if mode == "通常判定" and selected_type != "すべて":
+            if item["artifact_type"] != selected_type:
+                continue
+
         score = calculate_score(item["stats"], build_type)
         results.append({**item, "score": score})
 
@@ -209,7 +307,9 @@ if uploaded_files:
     results = sorted(results, key=lambda x: x["score"], reverse=True)
 
     # 結果表示
-    st.subheader("スコア結果一覧（スコア順）")
+    st.subheader(
+        f"スコア結果一覧（スコア順 / 該当件数: {len(results)}件）"
+    )
 
     for item in results:
         score = item["score"]
@@ -219,7 +319,15 @@ if uploaded_files:
 
             with col1:
                 st.markdown(f"**{item['filename']}**")
-                st.caption(f"メイン: **{item['main_stat']}**")
+
+                type_info = (
+                    f" / 部位: **{item['artifact_type']}**"
+                    if mode == "通常判定"
+                    else ""
+                )
+                st.caption(
+                    f"メイン: **{item['main_stat']}**{type_info}"
+                )
 
                 stats = item["stats"]
                 details = []
